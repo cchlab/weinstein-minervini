@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Weinstein × Minervini 波段選股</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#1e40af">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 16px;
+      min-height: 100vh;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    h1 { font-size: 1.4rem; color: #60a5fa; }
+    .subtitle { font-size: 0.85rem; color: #94a3b8; margin-top: 4px; }
+    .input-group {
+      margin-bottom: 16px;
+    }
+    label { display: block; font-size: 0.85rem; margin-bottom: 6px; color: #cbd5e1; }
+    input, button {
+      width: 100%;
+      padding: 14px;
+      border-radius: 12px;
+      border: none;
+      font-size: 1rem;
+    }
+    input {
+      background: #1e293b;
+      color: white;
+      margin-bottom: 10px;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:active { background: #1d4ed8; }
+    .card {
+      background: #1e293b;
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .ticker { font-size: 1.3rem; font-weight: 700; color: #60a5fa; }
+    .price { font-size: 1.5rem; font-weight: 700; margin: 4px 0; }
+    .row { display: flex; justify-content: space-between; margin: 6px 0; font-size: 0.9rem; }
+    .label { color: #94a3b8; }
+    .value { font-weight: 600; }
+    .good { color: #4ade80; }
+    .bad { color: #f87171; }
+    .status { font-size: 0.8rem; padding: 4px 8px; border-radius: 8px; }
+    .footer { text-align: center; font-size: 0.75rem; color: #64748b; margin-top: 30px; }
+    .loading { text-align: center; padding: 40px; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Weinstein × Minervini</h1>
+    <div class="subtitle">波段觀察清單｜開盤前使用｜$200k 帳戶參考</div>
+  </div>
+
+  <div class="input-group">
+    <label>觀察清單（逗號分隔）</label>
+    <input type="text" id="tickers" value="MRK,UNH,CAH,TMO,ABBV,AMGN,ACHC,TGTX,KNSA,LLY">
+    <button onclick="loadData()">更新清單</button>
+  </div>
+
+  <div id="results"></div>
+
+  <div class="footer">
+    教育用途，非投資建議｜資料來源：Yahoo Finance<br>
+    建議在美股開盤前約 2 小時更新
+  </div>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+
+    async function loadData() {
+      const tickers = document.getElementById('tickers').value
+        .split(',').map(t => t.trim().toUpperCase()).filter(t => t);
+      
+      const container = document.getElementById('results');
+      container.innerHTML = '<div class="loading">正在抓取最新數據...</div>';
+
+      const results = [];
+      for (const ticker of tickers) {
+        try {
+          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1y`;
+          const res = await fetch(url);
+          const data = await res.json();
+          const result = data.chart.result[0];
+          const closes = result.indicators.quote[0].close.filter(c => c != null);
+          const close = closes[closes.length - 1];
+          
+          const ma50 = closes.slice(-50).reduce((a,b)=>a+b,0)/50;
+          const ma150 = closes.slice(-150).reduce((a,b)=>a+b,0)/150;
+          const ma200 = closes.slice(-200).reduce((a,b)=>a+b,0)/200;
+          
+          const stage2 = close > ma150;
+          const template = close > ma50 && ma50 > ma150 && ma150 > ma200;
+          
+          const buyPullback = (ma50 * 0.98).toFixed(2);
+          const stop = (ma50 * 0.95).toFixed(2);
+          const target = (close * 1.15).toFixed(2);
+          const risk = close - parseFloat(stop);
+          const rr = risk > 0 ? ((parseFloat(target) - close) / risk).toFixed(1) : '—';
+          const shares = Math.floor(2000 / risk);
+
+          results.push({ ticker, close, stage2, template, ma50, buyPullback, stop, target, rr, shares });
+        } catch (e) {
+          console.error(ticker, e);
+        }
+      }
+
+      container.innerHTML = results.map(r => `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div class="ticker">${r.ticker}</div>
+            <div>
+              <span class="status ${r.stage2 ? 'good' : 'bad'}">${r.stage2 ? 'Stage 2' : '非 Stage 2'}</span>
+              <span class="status ${r.template ? 'good' : 'bad'}">${r.template ? 'Template' : '未符合'}</span>
+            </div>
+          </div>
+          <div class="price">$${r.close.toFixed(2)}</div>
+          <div class="row"><span class="label">50日 MA</span><span class="value">$${r.ma50.toFixed(2)}</span></div>
+          <div class="row"><span class="label">潛在買點（回檔）</span><span class="value">$${r.buyPullback}</span></div>
+          <div class="row"><span class="label">止損</span><span class="value">$${r.stop}</span></div>
+          <div class="row"><span class="label">目標（+15%）</span><span class="value">$${r.target}</span></div>
+          <div class="row"><span class="label">Risk / Reward</span><span class="value">${r.rr}</span></div>
+          <div class="row"><span class="label">建議股數（1%風險）</span><span class="value">${r.shares} 股</span></div>
+        </div>
+      `).join('');
+    }
+
+    // 首次載入
+    loadData();
+  </script>
+</body>
+</html>
